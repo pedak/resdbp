@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block body %}
+  
+  <h2>Simulation overview</h2>
+
+  <p>Simulated data source: <b>{{ source.config['name'] }}</b></p>
+  <p>Number of seed resources: <b>{{ source.config['number_of_resources'] }}</b></p>
+  <p>Change delay (in seconds): <b> {{ source.config['change_delay'] }}</b></p>
+  <p>Event types: <b>{{ " ".join(source.config['event_types']) }}</b></p>
+  <p>Average payload: <b>{{ source.config['average_payload'] }}</b> bytes</p>
+  <p>Current resources: <b>{{ resource_count }} </b>
+    (<a href="/resources">view sample)</a>
+  </p>
+  
+  {% if source.has_inventory %}
+  <br />
+
+  <h3>Inventory</h3>
+  <p>URI: <a href="{{ source.inventory.uri }}">{{ source.inventory.uri }}</a></p>
+  <p>Implementation: <b>{{ source.inventory.config['class'] }}</b></p>
+  {% for (k,v) in source.inventory.config.iteritems() %}
+    {% if not k == "class" %}
+    <p> {{ k }}: {{ v }}</p>
+    {% end %}
+  {% end %}
+  
+  {% end %}
+  
+  {% if source.has_changememory %}
+  <br />
+
+  <h3>Change Memory</h3>
+  <p>Implementation: <b>{{ source.changememory.config['class'] }}</b></p>
+  <p>URI: <a href="{{ source.changememory.uri }}">{{ source.changememory.uri }}</a></p>
+  {% for (k,v) in source.changememory.config.iteritems() %}
+    {% if not k == "class" %}
+    <p> {{ k }}: {{ v }}</p>
+    {% end %}
+  {% end %}
+  
+  {% end %}  
+
+{% end %}
