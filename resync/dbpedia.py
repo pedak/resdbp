@@ -277,8 +277,8 @@ def main():
             cs=cs.next()
             graph=DBpedia.download_changeset(cs)
             print "Change Events of %s" % cs
-            #DBpedia.check_graph(graph[0],"added")
-            #DBpedia.check_graph(graph[1],"deleted")
+            DBpedia.check_graph(graph[0],"added")
+            DBpedia.check_graph(graph[1],"deleted")
         else:
             print "sleeping"
             time.sleep(10)
