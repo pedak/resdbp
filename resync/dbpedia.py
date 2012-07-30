@@ -47,24 +47,25 @@ class DBpedia():
     @staticmethod  
     def download_changeset(changeset):
         """unzip changeset and compare with actual live resource"""
-        print "*** Download Changeset %s " % changeset
-        try:
-            addedgraph=DBpedia.download_graph(changeset.addedurl)
-            deletedgraph=DBpedia.download_graph(changeset.deletedurl)
-            return addedgraph, deletedgraph
-        except IOError as e:
-            print ("Failed to load changeset at %s, HTTP return code: %s" % (changeset,url.getcode()))
-            return False
+        addedgraph=DBpedia.download_graph(changeset.addedurl)
+        deletedgraph=DBpedia.download_graph(changeset.deletedurl)
+        print "*** Changesets downloaded: %s " % changeset
+        return addedgraph, deletedgraph
+
     
     @staticmethod
     def download_graph(url):
         """download graph at given url"""
-        graph = rdflib.Graph()
-        url = urllib.urlopen(url)
-        url_f = StringIO.StringIO(url.read())
-        zipped_file = gzip.GzipFile(fileobj=url_f)
-        graph.parse(zipped_file, format="nt")
-        return graph
+        try:
+            graph = rdflib.Graph()
+            url = urllib.urlopen(url)
+            url_f = StringIO.StringIO(url.read())
+            zipped_file = gzip.GzipFile(fileobj=url_f)
+            graph.parse(zipped_file, format="nt")
+            return graph
+        except IOError as e:
+            print ("Failed to download changeset at %s" % url.getcode())
+            return False
 
 
     @staticmethod  
@@ -86,6 +87,8 @@ class DBpedia():
     @staticmethod        
     def check_graph(graph,type):
         """check if update or create by comparision with live graph"""
+        if not graph:
+            return False
         result=graph.query("""SELECT DISTINCT ?subject WHERE {?subject ?b ?c}""")
         """for every subject of changeset graph try to find other triples in DBpedia live to differ between add/update/delete"""
         for subject in result:
@@ -95,15 +98,12 @@ class DBpedia():
                 onl_graph=rdflib.Graph()
                 try:
                     onl_graph.parse(live_resource)
-                    print live_resource
                     onl_iso = to_isomorphic(onl_graph)
                     loc_iso = to_isomorphic(graph)
                     in_both, in_onl, in_loc = graph_diff(onl_iso,loc_iso)
                     event_type="notupdated"
                     event=None
-                    print type
                     for res_of_diff, b, c in in_onl:
-                        #print "a: %s subject: %s" % (a,DBpedia.liveize(changed_resource))
                         # if live graph has more triples about resource it should be an update
                         if(str(live_resource)==str(res_of_diff)): 
                             event_type="update"
@@ -126,10 +126,17 @@ class DBpedia():
         urlhandler = urllib.urlopen(url)
         csmark=urlhandler.read()
         time=datetime.datetime.strptime(csmark[:13],"%Y-%m-%d-%H")
-        c=Changeset(None,time,(int(csmark[14:])-1))
-        return c
-
-
+        cs=Changeset({'date' : time, 'number' : (int(csmark[14:])-1)}) # TODO: why not possible to download latest file (without -1)
+        return cs
+    
+    @staticmethod
+    def get_cs_by_url(url):
+        return Changeset({'url' : url})
+    
+    @staticmethod
+    def get_cs_by_date(date, number):
+        return Changeset({  'date' : date,
+                        'number' : number})
 
 class Changeset():
     
@@ -137,82 +144,95 @@ class Changeset():
     ADDED_EXTENSION = ".added.nt.gz"
     DELETED_EXTENSION = ".removed.nt.gz"
     
-    def __init__(self,url=None, date=None, number=None):
-        if(url):
-            self.set_by_url(url)
-        elif(date and number):
-            self.set_by_date(date, number)
+    def __init__(self,args):
+        if('url' in args):
+            self.get_by_url(args['url'])
+        elif('date' in args and 'number' in args):
+            self.get_by_date(args['date'], args['number'])
         else:
-            raise Exception("not possible to build changeset without any information")
+            raise Exception("not possible to build changeset without parameters")
     
     def __eq__(self,other):
-        return self.url==other.url
+        return self.baseurl==other.baseurl
+        
+    def __le__(self,other):
+        if((self.date==other.date and self.number<=other.number) or self.date<other.date):
+            return True
+        return False
+        
+    def __lt__(self,other):
+        if((self.date==other.date and self.number<other.number) or self.date<other.date):
+            return True
+        return False
 
-    def set_by_url(self, url):
-        self.update_url(url)
-        self.check()
-
-    def set_by_date(self,date,number):
+    def get_by_url(self, url):
+        """get changeset by url"""
+        self.baseurl=url[:url.find(Changeset.ADDED_EXTENSION) + url.find(Changeset.DELETED_EXTENSION) + 1]
+        url_part=url.split("/")
+        pos=len(url_part)-5
+        year=int(url_part[pos])
+        month=int(url_part[pos+1])
+        day=int(url_part[pos+2])
+        hour=int(url_part[pos+3])
+        self.number=int(url_part[pos+4].split(".")[0])
+        self.date=datetime.datetime(year,month,day,hour)
+        self.createurls()
+        
+    def get_by_date(self,date,number):
+        """get changeset by date"""
         self.date=date
         self.number=number
-        self.update_date(date)
-        self.check()
-               
-    def update_url(self,url):
-        """update url of changeset"""
-        self.baseurl=url[:url.find(Changeset.ADDED_EXTENSION) + url.find(Changeset.DELETED_EXTENSION) + 1]
-        x=url.split("/")
-        y=len(x)-5
-        self.year=int(x[y])
-        self.month=int(x[y+1])
-        self.day=int(x[y+2])
-        self.hour=int(x[y+3])
-        self.number=int(x[y+4].split(".")[0])
-        self.createurls()
-    
-    def update_date(self,date):
-        """update date of changeset"""
-        self.year=int(date.strftime("%Y"))
-        self.month=int(date.strftime("%m"))
-        self.day=int(date.strftime("%d"))
-        self.hour=int(date.strftime("%H"))
         self.createurls()
     
     def increase_hour(self):
         """increase hour of changeset to be able to continue with next hour folder"""
-        print "%s %s %s %s %s" % (self.year, self.month, self.day, self.hour, self.number)
-        date=datetime.datetime(self.year,self.month,self.day,self.hour)
-        date=date+datetime.timedelta(hours=1)
+        self.date=self.date+datetime.timedelta(hours=1)
         self.number=0
-        self.update_date(date)
-        
-    def createurls(self):
-        """Create URL of changelog file"""
-        self.baseurl="%s%s/%s/%s/%s/%s" % (Changeset.DBPEDIALIVE_UPDATE_URL, self.year, str(self.month).zfill(2), str(self.day).zfill(2), str(self.hour).zfill(2), str(self.number).zfill(6))
-        self.addedurl="%s%s/%s/%s/%s/%s%s" % (Changeset.DBPEDIALIVE_UPDATE_URL, self.year, str(self.month).zfill(2), str(self.day).zfill(2), str(self.hour).zfill(2), str(self.number).zfill(6), Changeset.ADDED_EXTENSION)
-        self.deletedurl="%s%s/%s/%s/%s/%s%s" % (Changeset.DBPEDIALIVE_UPDATE_URL, self.year, str(self.month).zfill(2), str(self.day).zfill(2), str(self.hour).zfill(2), str(self.number).zfill(6), Changeset.DELETED_EXTENSION)
-        
+        self.createurls()
+
     def increase_number(self):
         """increase number to possible next changset"""
         self.number+=1
         self.createurls()
-          
+        
+    def createurls(self):
+        """Update URLs of changelog files"""
+        self.baseurl="%s%s/%s/%s/%s/%s" % (Changeset.DBPEDIALIVE_UPDATE_URL, self.date.strftime("%Y"),
+            self.date.strftime("%m").zfill(2), self.date.strftime("%d").zfill(2), self.date.strftime("%H").zfill(2), str(self.number).zfill(6))
+        self.addedurl="%s%s/%s/%s/%s/%s%s" % (Changeset.DBPEDIALIVE_UPDATE_URL, self.date.strftime("%Y"), self.date.strftime("%m").zfill(2),
+            self.date.strftime("%d").zfill(2), self.date.strftime("%H").zfill(2), str(self.number).zfill(6), Changeset.ADDED_EXTENSION)
+        self.deletedurl="%s%s/%s/%s/%s/%s%s" % (Changeset.DBPEDIALIVE_UPDATE_URL, self.date.strftime("%Y"), self.date.strftime("%m").zfill(2),
+            self.date.strftime("%d").zfill(2), self.date.strftime("%H").zfill(2), str(self.number).zfill(6), Changeset.DELETED_EXTENSION)
+
+    def hasnext(self):
+        url="http://live.dbpedia.org/liveupdates/lastPublishedFile.txt"
+        urlhandler = urllib.urlopen(url)
+        csmark=urlhandler.read()
+        time=datetime.datetime.strptime(csmark[:13],"%Y-%m-%d-%H")
+        cs=Changeset({'date' : time, 'number' : (int(csmark[14:])-1)}) # TODO: why not possible to download latest file (without -1)
+        return (self<cs)
+        
     def next(self):
         """return next changeset"""
-        failcounter=0
-        while True:
-            """increase and try to catch next changesets"""
-            time.sleep(1)
-            if(failcounter>1):
-                failcounter=0
-                self.increase_hour()
-            else:
-                self.increase_number()
-                failcounter+=1
-            self.status=self.check()
-            if (self.status==200):
-                print "*** Changeset %s successfully loaded" % self.baseurl
-                return True
+        ncs=Changeset({'url' : self.baseurl}) # copy object
+        while self.hasnext():
+            """return next changeset"""
+            max_fails=5
+            failcounter=0
+            while failcounter<=max_fails:
+                ncs.increase_number()
+                if (ncs.check()==200): # is cs with increased number available?
+                    print "*** HTTP-Code: 200: %s" % ncs
+                    return ncs
+                elif(failcounter==max_fails): # max_fails with increasing number hit?
+                    print "*** Could not find any more changesets in folder, increasing to next hour"
+                    ncs.increase_hour()
+                    failcounter=0
+                    if(ncs.check()==200):
+                        return ncs
+                else:
+                    failcounter+=1
+        return False
     
     def check(self):
         """check response status of changeset """
@@ -221,32 +241,47 @@ class Changeset():
             print "*** %i try to check status of %s" % (i,self.addedurl)
             try:
                 urlh=urllib.urlopen(self.addedurl)
-                print urlh.getcode()
-                return urlh.getcode()
+                self.status=urlh.getcode()
+                if(self.status==200):
+                    return self.status
+                else:
+                    print "Failed to load changeset %s" % self
+                    return False
             except IOError as e:
                 print ("### Failed to load changeset at %s -  %s" % (self.addedurl, e))
                 return False
-            time.sleep(1)
 
-    def get_changeset(self):
-        """return http-code"""
-       
-    
     def __str__(self):
         return self.baseurl
-  
     
 def main():
-#    x=Changeset("http://live.dbpedia.org/liveupdates/2012/07/20/23/000060.added.nt.gz")    
+    """get next in range (cs,latest)"""
+#    latest=DBpedia.get_latest_changeset()
+#   cs=DBpedia.get_cs_by_url("http://live.dbpedia.org/liveupdates/2012/07/20/23/000062.added.nt.gz")
+#    print cs.next(latest)
+    
+    """Get cs by url"""
+#    print Changeset({'url' : 'http://live.dbpedia.org/liveupdates/2012/07/20/23/000062.added.nt.gz'})
 
-    print DBpedia.get_latest_changeset()
-    x=Changeset("http://live.dbpedia.org/liveupdates/2012/07/20/23/000062.added.nt.gz")
-    print x
-    while x.next():
-        graph=DBpedia.download_changeset(x)
-        print DBpedia.check_graph(graph[0],"added")
-        print DBpedia.check_graph(graph[1],"deleted")
-    
-    
+    """Get latest cs"""
+#   print DBpedia.get_latest_changeset() 
+     
+    """get cs by date"""
+#   date=datetime.datetime.now()
+#   print DBpedia.get_cs_by_date(date,0)
+      
+    """get all changesets between cs and latest"""
+    cs=DBpedia.get_cs_by_url('http://live.dbpedia.org/liveupdates/2012/07/30/15/000018.added.nt.gz')
+    while True:
+        if(cs.hasnext()):
+            cs=cs.next()
+            graph=DBpedia.download_changeset(cs)
+            print "Change Events of %s" % cs
+            #DBpedia.check_graph(graph[0],"added")
+            #DBpedia.check_graph(graph[1],"deleted")
+        else:
+            print "sleeping"
+            time.sleep(10)
+                    
 if __name__ == '__main__':
     main()    
