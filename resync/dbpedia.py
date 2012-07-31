@@ -18,10 +18,7 @@ import urllib
 import datetime
 import rdflib
 from rdflib.compare import to_isomorphic, graph_diff
-
-from apscheduler.scheduler import Scheduler
-from change import ChangeEvent
-from resource import Resource
+from resync.resource_change import ResourceChange
 
 class DBpedia():
     """Returns all missed changelog files"""
@@ -91,6 +88,7 @@ class DBpedia():
             return False
         result=graph.query("""SELECT DISTINCT ?subject WHERE {?subject ?b ?c}""")
         """for every subject of changeset graph try to find other triples in DBpedia live to differ between add/update/delete"""
+        events=[]
         for subject in result:
             resource=subject[0]
             if(resource.find(DBpedia.DBPEDIAURL)==0): #apply only for resources on server with DBPEDIA URL
@@ -108,16 +106,17 @@ class DBpedia():
                         if(str(live_resource)==str(res_of_diff)): 
                             event_type="update"
                             break;
-                    if(event_type=="notupdated" and type=="added"):
-                        event = ChangeEvent("CREATE", str(live_resource))
-                    elif(event_type=="notupdated" and type=="deleted"):
-                        event = ChangeEvent("DELETE", str(live_resource))
+                    if(event_type=="notupdated" and type=="create"):
+                        event = ResourceChange(resource=str(live_resource), changetype="CREATE")
+                    elif(event_type=="notupdated" and type=="delete"):
+                        event = ResourceChange(resource=str(live_resource), changetype="UPDATE")
                     else:        
-                        event = ChangeEvent("UPDATE", str(live_resource))
-                    print event
+                        event = ResourceChange(resource=str(live_resource), changetype="DELETE")
+                    events.append(event)
                 except Exception as e:
-                    print "Error parsing %s" % live_resource
+                    print "Error parsing %s: %s" % (live_resource,e)
                 #self.notify_observers(event)
+        return events
     
     @staticmethod    
     def get_latest_changeset():
