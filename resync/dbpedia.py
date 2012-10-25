@@ -18,7 +18,7 @@ import urllib
 import datetime
 import rdflib
 from rdflib.compare import to_isomorphic, graph_diff
-from resync.resource_change import ResourceChange
+from resource_change import ResourceChange
 
 class DBpedia():
     """Returns all missed changelog files"""
@@ -94,27 +94,27 @@ class DBpedia():
             if(resource.find(DBpedia.DBPEDIAURL)==0): #apply only for resources on server with DBPEDIA URL
                 live_resource=DBpedia.liveize(resource) #online version of dbpedia live have different URIs as changeset URIs
                 onl_graph=rdflib.Graph()
-                try:
-                    onl_graph.parse(live_resource)
-                    onl_iso = to_isomorphic(onl_graph)
-                    loc_iso = to_isomorphic(graph)
-                    in_both, in_onl, in_loc = graph_diff(onl_iso,loc_iso)
-                    event_type="notupdated"
-                    event=None
-                    for res_of_diff, b, c in in_onl:
-                        # if live graph has more triples about resource it should be an update
-                        if(str(live_resource)==str(res_of_diff)): 
-                            event_type="update"
-                            break;
-                    if(event_type=="notupdated" and type=="create"):
-                        event = ResourceChange(resource=str(live_resource), changetype="CREATE")
-                    elif(event_type=="notupdated" and type=="delete"):
-                        event = ResourceChange(resource=str(live_resource), changetype="UPDATE")
-                    else:        
-                        event = ResourceChange(resource=str(live_resource), changetype="DELETE")
-                    events.append(event)
-                except Exception as e:
-                    print "Error parsing %s: %s" % (live_resource,e)
+            #try:
+                onl_graph.parse(live_resource)
+                onl_iso = to_isomorphic(onl_graph)
+                loc_iso = to_isomorphic(graph)
+                in_both, in_onl, in_loc = graph_diff(onl_iso,loc_iso)
+                event_type="notupdated"
+                event=None
+                for res_of_diff, b, c in in_onl:
+                    # if live graph has more triples about resource it should be an update
+                    if(str(live_resource)==str(res_of_diff)): 
+                        event_type="update"
+                        break;
+                if(event_type=="notupdated" and type=="added"):
+                    event = ResourceChange(uri=str(live_resource), changetype="CREATE")
+                elif(event_type=="update" and type=="added"):
+                    event = ResourceChange(uri=str(live_resource), changetype="UPDATE")
+                else:
+                    event = ResourceChange(uri=str(live_resource), changetype="DELETE")
+                events.append(event)
+            #except Exception as e:
+                #print "Error parsing %s: %s" % (live_resource,e)
                 #self.notify_observers(event)
         return events
     
@@ -276,8 +276,14 @@ def main():
             cs=cs.next()
             graph=DBpedia.download_changeset(cs)
             print "Change Events of %s" % cs
-            DBpedia.check_graph(graph[0],"added")
-            DBpedia.check_graph(graph[1],"deleted")
+            added=DBpedia.check_graph(graph[0],"added")
+            deleted=DBpedia.check_graph(graph[1],"deleted")
+            print "added triples"
+            for x in added:
+                print str(x)
+            print "deleted triples"
+            for y in deleted:
+                print str(y)
         else:
             print "sleeping"
             time.sleep(10)
